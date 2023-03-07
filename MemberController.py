@@ -4,8 +4,14 @@ from db_config import conn
 
 def addMemberDB(user, member):
     cursor = conn.cursor()
-    query = "insert into members (user_id, name) values ({}, '{}')".format(user.chat_id, member)
-    cursor.execute(query)
+    query = """
+    insert
+    into members (user_id, name)
+    select {}, %s 
+    where not exists (select * from members where name = %s and user_id = {})
+    """.format(user.chat_id, user.chat_id)
+
+    cursor.execute(query, (member, member,))
     conn.commit()
     cursor.close()
     return

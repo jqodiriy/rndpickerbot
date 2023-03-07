@@ -18,8 +18,9 @@ bot.set_my_commands([
     telebot.types.BotCommand("/start", "Boshlash"),
     telebot.types.BotCommand("/add", "Yangi user qo'shish"),
     telebot.types.BotCommand("/list", "Ro'yxatni ko'rish"),
-    telebot.types.BotCommand("/select", "Random uchun ro'yxatladab belgilash")
+    telebot.types.BotCommand("/select", "Random uchun ro'yxatdan tanlash")
 ])
+
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -58,16 +59,18 @@ def selectList(message):
     user = db_manager.get_user(message.chat.id)
     user.status = MEMBER_SELECT
     db_manager.updateStatus(user)
-    showMembersForSelect(user,True)
+    showMembersForSelect(user, True)
 
 
 @bot.message_handler(commands=['random'])
 def selectRandom(user):
-    # user = db_manager.get_user(message.chat.id)
     user.status = 0
     db_manager.updateStatus(user)
     member = MemberController.getRandom(user.chat_id)
-    bot.send_message(user.chat_id, "Random tanlangan: " + member.name)
+    if member is not None:
+        bot.send_message(user.chat_id, "Random tanlangan user: " + member.name)
+    else:
+        bot.send_message(user.chat_id, "Bironta ham user tanlanmadi !!!")
 
 
 @bot.callback_query_handler(func=lambda callback: callback.data)
@@ -79,18 +82,41 @@ def callBackHandler(callback):
 
     if user.status == MEMBER_LIST and member_id > 0:
         MemberController.removeMember(member_id)
-        bot.delete_message(user.chat_id, message_id)
-        showMembersForRemove(user)
+        markup = editMarkupMembersList(user)
+        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=markup)
 
     elif user.status == MEMBER_SELECT and member_id > 0:
         MemberController.toggleMember(member_id)
-        bot.delete_message(user.chat_id, message_id)
-        showMembersForSelect(user)
+        markup = editMarkupMembersSelect(user)
+        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=markup)
 
     elif member_id == 0 and user.status == MEMBER_SELECT:
+        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=None)
         selectRandom(user)
     else:
-        bot.delete_message(user.chat_id, message_id)
+        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=None)
+        return
+
+
+def editMarkupMembersList(user):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    members = getMembers(user, False)
+    for member in members:
+        kb.add(types.InlineKeyboardButton(text=member.name + "   ✖️", callback_data=str(member.id)))
+    return kb
+
+
+def editMarkupMembersSelect(user):
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    members = MemberController.getMembers(user, False)
+    for member in members:
+        if member.selected:
+            kb.add(types.InlineKeyboardButton(text=member.name + " ✅ ", callback_data=str(member.id)))
+        else:
+            kb.add(types.InlineKeyboardButton(text=member.name, callback_data=str(member.id)))
+
+    kb.add(types.InlineKeyboardButton(text="Random tanlash", callback_data="0"))
+    return kb
 
 
 def showMembersForRemove(user):
@@ -128,8 +154,6 @@ def welcome(user):
 
 def addMember(user, member):
     addMemberDB(user, member)
-    user.status = 0
-    db_manager.updateStatus(user)
     bot.send_message(user.chat_id, "sizning ro'yaxatingizga {} qo'shildi".format(member))
 
 

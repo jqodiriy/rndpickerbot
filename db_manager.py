@@ -21,8 +21,9 @@ def get_user(chat_id):
 
 def addUser(user):
     cursor = conn.cursor()
-    query = "insert into users (chat_id, username) values ({}, '{}') returning id".format(user.chat_id, user.username)
-    cursor.execute(query)
+    query = "insert into users (chat_id, username) values ({}, %s) returning id".format(user.chat_id)
+    cursor.execute(query, (user.username,))
+
     conn.commit()
     cursor.close()
     return
