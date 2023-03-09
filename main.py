@@ -1,12 +1,10 @@
+import random
+
 import telebot
 from telebot import types
 
-import MemberController
+import FileController
 import config
-import db_manager
-from MemberController import addMemberDB
-from MemberController import getMembers
-from user_model import UserModel
 
 bot = telebot.TeleBot(config.TOKEN)
 
@@ -17,144 +15,125 @@ MEMBER_SELECT = 3
 bot.set_my_commands([
     telebot.types.BotCommand("/start", "Boshlash"),
     telebot.types.BotCommand("/add", "Yangi user qo'shish"),
-    telebot.types.BotCommand("/list", "Ro'yxatni ko'rish"),
     telebot.types.BotCommand("/select", "Random uchun ro'yxatdan tanlash")
 ])
 
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    user = db_manager.get_user(message.chat.id)
-
-    if user is None:
-        user = UserModel(0, message.chat.id, message.from_user.username, 0)
-        welcome(user)
-    else:
-        bot.send_message(message.chat.id, "Hello")
+    bot.send_message(message.chat.id, "Hello")
 
 
 @bot.message_handler(commands=['add'])
 def add(message):
-    user = db_manager.get_user(message.chat.id)
-    if user is None:
-        user = UserModel(0, message.chat.id, message.from_user.username, 0)
-        welcome(user)
-    bot.send_message(user.chat_id, "Yangi user ismini kiriting: ")
-    user.status = MEMBER_ADD
-    db_manager.updateStatus(user)
+    bot.send_message(message.chat.id, "Yangi user ismini kiriting: ")
+    FileController.setStatus(MEMBER_ADD)
     return
 
 
 @bot.message_handler(commands=['list'])
 def commandList(message):
-    user = db_manager.get_user(message.chat.id)
-    if user is not None:
-        showMembersForRemove(user)
-        user.status = MEMBER_LIST
-        db_manager.updateStatus(user)
+    chat_id = message.chat.id
+    showMembersForRemove(chat_id)
+    FileController.setStatus(MEMBER_LIST)
 
 
 @bot.message_handler(commands=['select'])
 def selectList(message):
-    user = db_manager.get_user(message.chat.id)
-    user.status = MEMBER_SELECT
-    db_manager.updateStatus(user)
-    showMembersForSelect(user, True)
+    FileController.setStatus(MEMBER_SELECT)
+    showMembersForSelect(message.chat.id)
 
 
-@bot.message_handler(commands=['random'])
-def selectRandom(user):
-    user.status = 0
-    db_manager.updateStatus(user)
-    member = MemberController.getRandom(user.chat_id)
-    if member is not None:
-        bot.send_message(user.chat_id, "Random tanlangan user: " + member.name)
+# @bot.message_handler(commands=['random'])
+def selectRandom(chat_id):
+    members = FileController.getMembers()
+
+    selected = list(filter(lambda member: member.selected == 1, members))
+    if len(selected) > 0:
+        x = random.randint(0, len(selected) - 1)
+        member = selected[x]
+        bot.send_message(chat_id, "Random tanlangan user: " + member.name)
     else:
-        bot.send_message(user.chat_id, "Bironta ham user tanlanmadi !!!")
+        bot.send_message(chat_id, "Bironta ham user tanlanmadi !!!")
 
 
 @bot.callback_query_handler(func=lambda callback: callback.data)
 def callBackHandler(callback):
     chat_id = callback.from_user.id
     message_id = callback.message.id
-    user = db_manager.get_user(chat_id)
-    member_id = int(callback.json["data"])
+    member = callback.json["data"]
 
-    if user.status == MEMBER_LIST and member_id > 0:
-        MemberController.removeMember(member_id)
-        markup = editMarkupMembersList(user)
-        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=markup)
+    status = FileController.getStatus()
 
-    elif user.status == MEMBER_SELECT and member_id > 0:
-        MemberController.toggleMember(member_id)
-        markup = editMarkupMembersSelect(user)
-        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=markup)
+    if status == MEMBER_LIST and member != "0":
+        FileController.removeMember(member)
+        markup = editMarkupMembersList()
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
 
-    elif member_id == 0 and user.status == MEMBER_SELECT:
-        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=None)
-        selectRandom(user)
+    elif status == MEMBER_SELECT and member != "0":
+        FileController.updateMember(member)
+        markup = editMarkupMembersSelect()
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
+
+    elif status == MEMBER_SELECT and member == "0":
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
+        selectRandom(chat_id)
     else:
-        bot.edit_message_reply_markup(user.chat_id, message_id, reply_markup=None)
+        bot.edit_message_reply_markup(chat_id, message_id, reply_markup=None)
         return
 
 
-def editMarkupMembersList(user):
+def editMarkupMembersList():
     kb = types.InlineKeyboardMarkup(row_width=1)
-    members = getMembers(user, False)
+    members = FileController.getMembers()
     for member in members:
-        kb.add(types.InlineKeyboardButton(text=member.name + "   ✖️", callback_data=str(member.id)))
+        kb.add(types.InlineKeyboardButton(text=member.name + "   ✖️", callback_data=str(member.name)))
     return kb
 
 
-def editMarkupMembersSelect(user):
+def editMarkupMembersSelect():
     kb = types.InlineKeyboardMarkup(row_width=1)
-    members = MemberController.getMembers(user, False)
+    members = FileController.getMembers()
     for member in members:
-        if member.selected:
-            kb.add(types.InlineKeyboardButton(text=member.name + " ✅ ", callback_data=str(member.id)))
+        if int(member.selected) == 1:
+            kb.add(types.InlineKeyboardButton(text=member.name + " ✅ ", callback_data=str(member.name)))
         else:
-            kb.add(types.InlineKeyboardButton(text=member.name, callback_data=str(member.id)))
+            kb.add(types.InlineKeyboardButton(text=member.name, callback_data=str(member.name)))
 
     kb.add(types.InlineKeyboardButton(text="Random tanlash", callback_data="0"))
     return kb
 
 
-def showMembersForRemove(user):
+def showMembersForRemove(chat_id):
     kb = types.InlineKeyboardMarkup(row_width=1)
-    members = getMembers(user, False)
+    members = FileController.refreshSelects()
     for member in members:
-        kb.add(types.InlineKeyboardButton(text=member.name + "   ✖️", callback_data=str(member.id)))
-    bot.send_message(user.chat_id, text="Sizning ro'yxatingiz", reply_markup=kb)
+        kb.add(types.InlineKeyboardButton(text=member.name + "   ✖️", callback_data=str(member.name.strip())))
+
+    bot.send_message(chat_id, text="Sizning ro'yxatingiz", reply_markup=kb)
 
 
-def showMembersForSelect(user, refresh=False):
+def showMembersForSelect(chat_id):
     kb = types.InlineKeyboardMarkup(row_width=1)
-    members = MemberController.getMembers(user, refresh)
+    members = FileController.refreshSelects()
+
     for member in members:
-        if member.selected:
-            kb.add(types.InlineKeyboardButton(text=member.name + " ✅ ", callback_data=str(member.id)))
+        if member.selected == 0:
+            kb.add(types.InlineKeyboardButton(text=member.name + " ✅ ", callback_data=str(member.name)))
         else:
-            kb.add(types.InlineKeyboardButton(text=member.name, callback_data=str(member.id)))
+            kb.add(types.InlineKeyboardButton(text=member.name, callback_data=str(member.name)))
 
     kb.add(types.InlineKeyboardButton(text="Random tanlash", callback_data="0"))
-    bot.send_message(user.chat_id, text="Tanlang:", reply_markup=kb)
+    bot.send_message(chat_id, text="Tanlang:", reply_markup=kb)
 
 
 @bot.message_handler(content_types=['text'])
 def receiveText(message):
-    user = db_manager.get_user(message.from_user.id)
-    if user.status == MEMBER_ADD:
-        addMember(user, message.json["text"])
-
-
-def welcome(user):
-    db_manager.addUser(user)
-    bot.send_message(user.chat_id, "Welcome message")
-
-
-def addMember(user, member):
-    addMemberDB(user, member)
-    bot.send_message(user.chat_id, "sizning ro'yaxatingizga {} qo'shildi".format(member))
+    status = FileController.getStatus()
+    if status == MEMBER_ADD:
+        member = message.json["text"].strip()
+        FileController.addMember(member)
+        bot.send_message(message.chat.id, "ro'yxatga {} qo'shildi".format(member))
 
 
 bot.polling(none_stop=True)
